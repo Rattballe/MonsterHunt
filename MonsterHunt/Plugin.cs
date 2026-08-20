@@ -2,8 +2,6 @@ using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
-using System;
-using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 
@@ -14,7 +12,7 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "rattballe.repo.monsterhunt";
     public const string PluginName = "Monster Hunt";
-    public const string PluginVersion = "0.1.0";
+    public const string PluginVersion = "0.2.0";
 
     internal static ManualLogSource Log;
     internal static ConfigEntry<bool> Enabled;
@@ -26,8 +24,12 @@ public sealed class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> DisableQuota;
     internal static ConfigEntry<bool> HostOnly;
     internal static ConfigEntry<bool> DebugLogging;
+    internal static ConfigEntry<bool> FreeShotgun;
+    internal static ConfigEntry<bool> InfiniteCrystals;
+    internal static ConfigEntry<int> InfiniteCrystalAmount;
 
     private Harmony harmony;
+    private float currencyTimer;
 
     private void Awake()
     {
@@ -41,13 +43,37 @@ public sealed class Plugin : BaseUnityPlugin
         DisableQuota = Config.Bind("GameMode", "DisableQuota", true, "Make the normal round quota effectively unreachable.");
         HostOnly = Config.Bind("Multiplayer", "HostOnly", true, "Only the host modifies spawning and currency.");
         DebugLogging = Config.Bind("Debug", "DebugLogging", false, "Enable diagnostic logging.");
+        FreeShotgun = Config.Bind("Loadout", "FreeShotgun", true, "Spawn a free vanilla shotgun when a level starts.");
+        InfiniteCrystals = Config.Bind("Loadout", "InfiniteCrystals", true, "Keep run currency at the configured amount.");
+        InfiniteCrystalAmount = Config.Bind("Loadout", "InfiniteCrystalAmount", int.MaxValue, "Currency maintained by InfiniteCrystals. int.MaxValue is effectively unlimited.");
 
         if (!Enabled.Value)
             return;
 
         harmony = new Harmony(PluginGuid);
         harmony.PatchAll(Assembly.GetExecutingAssembly());
-        Log.LogInfo("Monster Hunt loaded: vanilla enemies, kill rewards, higher density, no quota.");
+        Log.LogInfo("Monster Hunt 0.2.0 loaded: free shotgun + unlimited currency enabled.");
+    }
+
+    private void Update()
+    {
+        if (!Enabled.Value || !InfiniteCrystals.Value || !IsHost())
+            return;
+
+        currencyTimer -= Time.unscaledDeltaTime;
+        if (currencyTimer > 0f)
+            return;
+
+        currencyTimer = 0.5f;
+        try
+        {
+            SemiFunc.StatSetRunCurrency(InfiniteCrystalAmount.Value);
+        }
+        catch (System.Exception ex)
+        {
+            if (DebugLogging.Value)
+                Log.LogWarning($"Could not maintain infinite currency: {ex.Message}");
+        }
     }
 
     internal static bool IsHost()
@@ -68,7 +94,9 @@ public sealed class Plugin : BaseUnityPlugin
 
     internal static void AddMoney(int amount)
     {
-        if (amount <= 0 || !IsHost()) return;
+        if (amount <= 0 || !IsHost() || InfiniteCrystals.Value)
+            return;
+
         int current = SemiFunc.StatGetRunCurrency();
         SemiFunc.StatSetRunCurrency(current + amount);
     }
